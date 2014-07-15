@@ -16,13 +16,22 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 MA  02110-1301  USA
 */
 
+#include <stdint.h>
+#include <time.h>
+typedef int64_t filetime_t;
+
 // PBO functionality
 #include "pbo.h"
 #include "sha1.h"
 
-#include <time.h>
 
+#ifndef _NIX
 #define WITH_GUI
+#else
+typedef unsigned long DWORD;
+typedef void *PVOID;
+typedef PVOID HANDLE;
+#endif
 
 #ifdef WITH_GUI
 #include <windows.h>
@@ -153,18 +162,15 @@ INT_PTR CALLBACK dialogproc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPara
 #endif
 
 // From the internets
-void UnixTimeToFileTime(time_t t, LPFILETIME pft) {
-     LONGLONG ll;
-     ll = Int32x32To64(t, 10000000) + 116444736000000000;
-     pft->dwLowDateTime = (DWORD)ll;
-     pft->dwHighDateTime = (DWORD) (ll >> 32);
+filetime_t UnixTimeToFileTime(time_t t) {
+     filetime_t f;
+     f = ((int64_t)t * 10000000) + 116444736000000000LL;
+     return f;
 }
-time_t FILETIMEToUnixTime(FILETIME filetime) {
-  long long int t = filetime.dwHighDateTime;
-    t <<= 32;
-    t += (unsigned long)filetime.dwLowDateTime;
-    t -= 116444736000000000LL;
-  return (time_t) (t / 10000000);
+time_t FileTimeToUnixTime(filetime_t f) {
+  time_t t;
+  t = (time_t) ((f - 116444736000000000LL) / 10000000);
+  return t;
 }
 
 
@@ -195,17 +201,29 @@ bool fgetsz(void *d, int maxlen, FILE *f) {
 
 // Create all subdirs in filename
 void createDirs(char *fname) {
-  char *fn = new char[strlen(fname)+1];
+  path p(fname);
+  //cout << "createDirs path: " << p.parent_path() << endl;
+  try {
+    create_directories(p.parent_path());
+  }
+
+  catch (const filesystem_error& ex) {
+    cout << ex.what() << '\n';
+  }
+
+  //create_directories(p);
+  /*char *fn = new char[strlen(fname)+1];
   strcpy(fn, fname);
 
-  for(DWORD i=0;i<strlen(fn);i++)
+  for(DWORD i=0;i<strlen(fn);i++) {
     if(fn[i] == '/' || fn[i] == '\\') {
       fn[i] = 0x00;
-      CreateDirectory(fn, NULL);
+      create_directories(path(fn));
       fn[i] = '/';
     }
+  }
 
-  delete[] fn;
+  delete[] fn;*/
 }
 
 // Extract a PBO, sf = source filename, dd = target directory
@@ -224,8 +242,8 @@ bool pboEx(char *sf, char *dd, bool overwrite, bool gui) {
 
   char prefix[FNAMELEN];
   char product[FNAMELEN];
-  ZeroMemory(prefix, FNAMELEN);
-  ZeroMemory(product, FNAMELEN);
+  memset(prefix, 0, FNAMELEN);
+  memset(product, 0, FNAMELEN);
 
   bool someFailed = false;
 
@@ -343,17 +361,17 @@ bool pboEx(char *sf, char *dd, bool overwrite, bool gui) {
 
   // Get output dir name
   char outdir[FNAMELEN];
-  ZeroMemory(outdir, FNAMELEN);
+  memset(outdir, 0, FNAMELEN);
   if(strlen(dd) == 0) {
-    if(!strstr(sf, ":")) {
-      GetCurrentDirectory(512, outdir);
-      strcat(outdir, "\\");
-      strncat(outdir, sf, strlen(sf)-4);
-    } else
-      strncpy(outdir, sf, strlen(sf)-4);
+    path p(sf);
+    const char *p_str = p.string().c_str();
+    if(!p.is_absolute()) { // is NOT an absolute path = is relative
+      path currdir = current_path();
+      p_str = (currdir /= path(sf)).string().c_str();
+    }
+    strncpy(outdir, p_str, strlen(p_str)-4);
   } else
     strcpy(outdir, dd);
-
 #ifdef WITH_GUI
   if(gui) {
     hideWindow(true);
@@ -371,28 +389,39 @@ bool pboEx(char *sf, char *dd, bool overwrite, bool gui) {
 #endif
 
   // Ask for overwriting
-  if(!overwrite && !CreateDirectory(outdir, NULL)) {
+  if(!overwrite && fileExists(outdir)) {
     char str[256];
     sprintf(str, "Directory '%s' already exists, overwrite files?", outdir);
-    int ret = MessageBox(NULL, str, VERSIONSTRING, MB_ICONQUESTION|MB_YESNO);
-    if(ret != IDYES)
+    #ifdef WITH_GUI
+      int ret = MessageBox(NULL, str, VERSIONSTRING, MB_ICONQUESTION|MB_YESNO);
+      if(ret != IDYES)
+    #else
+      char in;
+      cout << str << endl;
+      cin >> in;
+      if(in != 'Y' && in != 'y')
+    #endif
       return true; // Abort cleanly
   }
 
   // Create prefix store file
   if(strlen(prefix) > 0) {
     char oname[FNAMELEN];
-    sprintf(oname, "%s\\%s", outdir, PREFIXFILE);
+    sprintf(oname, "%s/%s", outdir, PREFIXFILE); // FIX THIS FOR WINDOWS
     createDirs(oname);
     FILE *fo = fopen(oname, "wb");
-    fputs(prefix ,fo);
-    fclose(fo);
+    if (fo) {
+      fputs(prefix, fo);
+      fclose(fo);
+    } else
+      cout << "Cannot open: " << oname << endl;
   }
 
   // Extract files
   for(int o=0;o<numFiles;o++) {
     char oname[FNAMELEN];
-    sprintf(oname, "%s\\%s", outdir, ft[o].fname);
+    std::string filename(ft[o].fname);
+    sprintf(oname, "%s/%s", outdir, replace_all_copy(filename, "\\", "/").c_str()); // FIX THIS FOR WINDOWS
 
     if(!ft[o].extract)  {
       fseek(i, ft[o].len, SEEK_CUR); 
@@ -401,7 +430,6 @@ bool pboEx(char *sf, char *dd, bool overwrite, bool gui) {
 
     int l = ft[o].len;
     printf("Extracting: %s (%d KB)\n", ft[o].fname, ft[o].len/1024);
-
     createDirs(oname);
     FILE *fo = fopen(oname, "wb");
 
@@ -438,19 +466,18 @@ bool pboEx(char *sf, char *dd, bool overwrite, bool gui) {
     }
 
     fclose(fo);
-
+/*
     // Set file time
-    if(ft[o].timestamp != 0) {			
+    if(ft[o].timestamp != 0) {
       HANDLE tf = CreateFile(oname, GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, NULL, NULL);
       if(tf != INVALID_HANDLE_VALUE) {
-        FILETIME filet;
-        UnixTimeToFileTime(ft[o].timestamp, &filet);
+        filetime_t filet = UnixTimeToFileTime(ft[o].timestamp);
         SetFileTime(tf, &filet, NULL, NULL);
         CloseHandle(tf);
       }
     } else {
       printf("Warning! File creation time not set (Invalid time)\n");
-    }
+    }*/
   }
 
   fclose(i);
@@ -460,12 +487,68 @@ bool pboEx(char *sf, char *dd, bool overwrite, bool gui) {
 }
 
 int getDirFiles(char *sd, FTENTRY *ftable, int *fti, char excludes[EX_NUM][EX_LEN]) {
-  char dir[FNAMELEN];
-  sprintf(dir, "%s\\*.*", sd);
-
-  WIN32_FIND_DATA fd;
   int res = 1;
   int count = 0;
+  path p (sd);
+
+  try {
+    if (exists(p)) {
+      if (is_directory(p)) {
+        for(recursive_directory_iterator i = recursive_directory_iterator(p); i != recursive_directory_iterator(); ++i) {
+          cout << i->path() << "\n";
+
+          char filename[FNAMELEN];
+          memset(filename, 0, FNAMELEN);
+          strcpy(filename, i->path().filename().string().c_str());
+          if(iequals(filename, PREFIXFILE)) // Do not pack prefix file
+            continue;
+          if(iequals(filename, EXCLUDEFILE))
+            continue;
+
+          if(is_directory(i->path())) {
+            continue;
+          }
+          // Check for exclude
+          bool skip = false;
+          for(int i=0;i<EX_NUM;i++) {
+            if(strlen(excludes[i]) > 1 && !strcasecmp(excludes[i], &filename[strlen(filename)-strlen(excludes[i])])) {
+              // printf("Skipping: %s - %s\n", fd.cFileName, excludes[i]);
+              skip = true;
+              break;
+            }
+          }
+          if(skip)
+            continue; // File extension is excluded
+
+          ++count;
+          if(ftable != NULL) {
+            // Fill table. filename...
+            static char foo[1024];
+            sprintf(foo, "%s\\%s", sd, filename);
+            strcpy(ftable[*fti].fname, foo);
+
+            // Modification time
+            //ftable[*fti].timestamp = (DWORD) FileTimetoUnixTime(fd.ftCreationTime);
+
+            // Size, TODO: 4GB limit check?
+            cout << file_size(i->path()) << "\n";
+            //ftable[*fti].len = (fd.nFileSizeHigh * MAXDWORD) + fd.nFileSizeLow;
+            ftable[*fti].len = file_size(i->path());
+
+            (*fti)++;
+          }
+        }
+      } else
+        cout << p << " is not a directory\n";
+    } else
+      cout << p << " does not exist\n";
+  }
+
+  catch (const filesystem_error& ex) {
+    cout << ex.what() << '\n';
+  }
+
+  /*WIN32_FIND_DATA fd;
   HANDLE h;
   for(h=FindFirstFile(dir, &fd);res && h != INVALID_HANDLE_VALUE;res = FindNextFile(h, &fd)) {
     if(!strcmp(fd.cFileName,".."))
@@ -502,7 +585,7 @@ int getDirFiles(char *sd, FTENTRY *ftable, int *fti, char excludes[EX_NUM][EX_LE
         strcpy(ftable[*fti].fname, foo);
 
         // Modification time
-        ftable[*fti].timestamp = (DWORD) FILETIMEToUnixTime(fd.ftCreationTime);
+        ftable[*fti].timestamp = (DWORD) FileTimetoUnixTime(fd.ftCreationTime);
 
         // Size, TODO: 4GB limit check?
         ftable[*fti].len = (fd.nFileSizeHigh * MAXDWORD) + fd.nFileSizeLow; 
@@ -512,7 +595,7 @@ int getDirFiles(char *sd, FTENTRY *ftable, int *fti, char excludes[EX_NUM][EX_LE
     }
   }
   if(h != INVALID_HANDLE_VALUE)
-    FindClose(h);
+    FindClose(h);*/
   return count;
 }
 
@@ -520,7 +603,7 @@ int getDirFiles(char *sd, FTENTRY *ftable, int *fti, char excludes[EX_NUM][EX_LE
 bool pboPack(char *sd, char *df, bool overwrite) {
   // Check for excludes file
   char excludes[EX_NUM][EX_LEN];
-  ZeroMemory(excludes, EX_NUM*EX_LEN);
+  memset(excludes, 0, EX_NUM*EX_LEN);
   char exname[FNAMELEN];
   sprintf(exname, "%s\\%s", sd, EXCLUDEFILE);
   FILE *ef = fopen(exname, "rb");
@@ -562,8 +645,15 @@ bool pboPack(char *sd, char *df, bool overwrite) {
   if(!overwrite && fileExists(outname)) {
     char str[256];
     sprintf(str, "File %s already exists, overwrite?", outname);
-    int ret = MessageBox(NULL, str, VERSIONSTRING, MB_ICONQUESTION|MB_YESNO);
-    if(ret != IDYES)
+    #ifdef WITH_GUI
+      int ret = MessageBox(NULL, str, VERSIONSTRING, MB_ICONQUESTION|MB_YESNO);
+      if(ret != IDYES)
+    #else
+      char in;
+      cout << str << endl;
+      cin >> in;
+      if(in != 'Y' && in != 'y')
+    #endif
       return true; // Abort cleanly
   }
 
@@ -579,7 +669,7 @@ bool pboPack(char *sd, char *df, bool overwrite) {
 
   // "sreV" Header
   char hdrb[21];
-  ZeroMemory(hdrb, 21);
+  memset(hdrb, 0, 21);
   strcpy(hdrb+1, "sreV");
   fwrite(hdrb, 21, 1, o);
 
@@ -617,7 +707,7 @@ bool pboPack(char *sd, char *df, bool overwrite) {
   }
   
   // Write blank separator block
-  ZeroMemory(hdrb, 21);
+  memset(hdrb, 0, 21);
   fwrite(hdrb, 21, 1, o);
 
   // Seek back & calculate hash for current data
@@ -671,7 +761,7 @@ bool pboDecompress(BYTE *buf, BYTE *out, int size, int outSize) {
   size = size-4;
   DWORD *checksumCorrect = (DWORD*) &buf[size];
 
-  ZeroMemory(out, outSize);
+  memset(out, 0, outSize);
 
   BYTE *ptr = buf;
   BYTE *optr = out;

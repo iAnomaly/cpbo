@@ -16,15 +16,21 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 MA  02110-1301  USA
 */
 
-#include <stdio.h>
-#include <windows.h>
+#ifndef _NIX
+#else
+typedef void *PVOID;
+typedef PVOID HANDLE;
+typedef HANDLE HWND;
+#endif
 #include "pbo.h"
 
+#ifndef _NIX
 HWND win = NULL;
 
 void hideWindow(bool state) {
   ShowWindow(win, !state);
 }
+#endif
 
 void usage(void) {
   printf("\nUsage:\n");
@@ -36,29 +42,34 @@ void usage(void) {
   printf("  cpbo.exe [-y] -p (directory) [filename.pbo]\n");
   printf("  pbo name is optional, directory name used if undefined\n");
   printf("  optional -y parameter overwrites pbo without asking\n\n");
+  #ifndef _NIX
   printf("Associate cpbo with PBO files and directories:\n");
   printf("  cpbo.exe -a\n");
-  exit(0);	
+  #endif
+  exit(0);
 }
 
 int main(int argc, char* argv[]) {
+  printf("%s <http://www.kegetys.net>\n", VERSIONSTRING);
+
+  #ifndef _NIX
   // Compare console title & try to find out if we were run from terminal or directly
   char ctit[256];
   char cmod[256];
   GetModuleFileName(NULL, cmod, 256);
   GetConsoleTitle(ctit, 256);
   SetConsoleTitle(VERSIONSTRING);
-  bool runDirectly = !_stricmp(ctit, cmod);
+  bool runDirectly = !strcasecmp(ctit, cmod);
 
   char rnd[256];
   sprintf(rnd, "_cpbo_tmp__%d__", GetTickCount());
   SetConsoleTitle(rnd);
   win = FindWindow(NULL, rnd);
   SetConsoleTitle(VERSIONSTRING);
-
-  printf("%s <http://www.kegetys.net>\n", VERSIONSTRING);
+  #endif
 
   if(argc < 2) {
+    #ifndef _NIX
     // If title & module name match we were propably run directly
     if(runDirectly) {
       // Double clicked exe, display query for file association
@@ -68,22 +79,24 @@ int main(int argc, char* argv[]) {
       else
         exit(0);
     } else
+    #else
       usage(); // Ran from console
+    #endif
   }
 
   // Parse parameters
   bool gui = false;
   bool overwrite = false;
   for(int ai=1;ai<argc;ai++) {
-    if(!_stricmp("-y", argv[ai])) {
+    if(!strcasecmp("-y", argv[ai])) {
       // Overwrite all files
       overwrite = true;
     }
 
-    if(!_stricmp("-gui", argv[ai]))
+    if(!strcasecmp("-gui", argv[ai]))
       gui = true;
 
-    if(!_stricmp("-e", argv[ai])) {
+    if(!strcasecmp("-e", argv[ai])) {
       if(argc-ai < 2)
         usage();
 
@@ -98,13 +111,15 @@ int main(int argc, char* argv[]) {
         return 1;
       } else {
         printf("Failed!\n");
+        #ifndef _NIX
         //MessageBox(NULL, "PBO extract failed", "cpbo", MB_ICONSTOP);
         MessageBox(NULL, "Extract of one or more files failed", "cpbo", MB_ICONSTOP);
+        #endif
         return -1;
       }
     }
 
-    if(!_stricmp("-p", argv[ai])) {
+    if(!strcasecmp("-p", argv[ai])) {
       if(argc-ai < 2)
         usage();
 
@@ -119,13 +134,15 @@ int main(int argc, char* argv[]) {
         return 1;
       } else {
         printf("Failed!\n");
+        #ifndef _NIX
         MessageBox(NULL, "PBO creation failed", "cpbo", MB_ICONSTOP);
+        #endif
         return -1;
       }
     }
 
-
-    if(!_stricmp("-a", argv[ai])) {
+    #ifndef _NIX
+    if(!strcasecmp("-a", argv[ai])) {
   assign:
       // Create file associations
       char foo[1024];
@@ -188,5 +205,6 @@ int main(int argc, char* argv[]) {
         MessageBox(NULL, "Done", "cpbo", MB_ICONINFORMATION);
       return 1;
     }
+    #endif
   }
 }

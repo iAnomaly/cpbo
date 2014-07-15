@@ -1,8 +1,18 @@
 #ifndef __PBO_H__
 #define __PBO_H__
 
-#include <stdio.h>
+#include <cstdio>
+using namespace std;
+#include <boost/filesystem.hpp>
+using namespace boost::filesystem;
+#include <boost/algorithm/string.hpp>
+using namespace boost::algorithm;
+#ifndef _NIX
 #include <windows.h>
+#else
+typedef unsigned char BYTE;   // 8-bit unsigned entity.
+typedef BYTE *        PBYTE;  // Pointer to BYTE.
+#endif
 
 // PBO Extract status
 #define STATUS_HEADER		0
@@ -41,4 +51,4 @@ typedef struct {
 	bool extract;
 } FTENTRY;
 
-#endif;
+#endif
