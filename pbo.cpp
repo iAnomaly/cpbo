@@ -192,7 +192,7 @@ bool fgetsz(void *d, int maxlen, FILE *f) {
   do {
     c = fgetc(f);
     *dd++ = c;
-    r++;
+    ++r;
   } while(c != 0x00 && c != EOF && r<maxlen);
   if(ferror(f))
     return false;
@@ -202,7 +202,6 @@ bool fgetsz(void *d, int maxlen, FILE *f) {
 // Create all subdirs in filename
 void createDirs(char *fname) {
   path p(fname);
-  //cout << "createDirs path: " << p.parent_path() << endl;
   try {
     create_directories(p.parent_path());
   }
@@ -210,20 +209,6 @@ void createDirs(char *fname) {
   catch (const filesystem_error& ex) {
     cout << ex.what() << '\n';
   }
-
-  //create_directories(p);
-  /*char *fn = new char[strlen(fname)+1];
-  strcpy(fn, fname);
-
-  for(DWORD i=0;i<strlen(fn);i++) {
-    if(fn[i] == '/' || fn[i] == '\\') {
-      fn[i] = 0x00;
-      create_directories(path(fn));
-      fn[i] = '/';
-    }
-  }
-
-  delete[] fn;*/
 }
 
 // Extract a PBO, sf = source filename, dd = target directory
@@ -305,7 +290,7 @@ bool pboEx(char *sf, char *dd, bool overwrite, bool gui) {
         if(strlen(str) != 0) {
           PBOENTRY e;
           fread(&e, sizeof(e), 1, i);
-          numFiles++;
+          ++numFiles;
         } else {
           // End of file table, seek back to beginning of table
           fseek(i, ftableptr, SEEK_SET);
@@ -345,7 +330,7 @@ bool pboEx(char *sf, char *dd, bool overwrite, bool gui) {
           ft[fi].timestamp = e.TimeStamp;
           ft[fi].extract = true;
 
-          fi++;
+          ++fi;
 
           break;
         }
@@ -420,7 +405,7 @@ bool pboEx(char *sf, char *dd, bool overwrite, bool gui) {
   // Extract files
   for(int o=0;o<numFiles;o++) {
     char oname[FNAMELEN];
-    std::string filename(ft[o].fname);
+    string filename(ft[o].fname);
     sprintf(oname, "%s/%s", outdir, replace_all_copy(filename, "\\", "/").c_str()); // FIX THIS FOR WINDOWS
 
     if(!ft[o].extract)  {
@@ -487,7 +472,6 @@ bool pboEx(char *sf, char *dd, bool overwrite, bool gui) {
 }
 
 int getDirFiles(char *sd, FTENTRY *ftable, int *fti, char excludes[EX_NUM][EX_LEN]) {
-  int res = 1;
   int count = 0;
   path p (sd);
 
@@ -495,19 +479,21 @@ int getDirFiles(char *sd, FTENTRY *ftable, int *fti, char excludes[EX_NUM][EX_LE
     if (exists(p)) {
       if (is_directory(p)) {
         for(recursive_directory_iterator i = recursive_directory_iterator(p); i != recursive_directory_iterator(); ++i) {
-          cout << i->path() << "\n";
 
           char filename[FNAMELEN];
           memset(filename, 0, FNAMELEN);
-          strcpy(filename, i->path().filename().string().c_str());
+          const char *rel = i->path().c_str(); // Path relative to sd (starting directory)
+          rel += strlen(sd) + 1;
+          strcpy(filename, rel);
           if(iequals(filename, PREFIXFILE)) // Do not pack prefix file
             continue;
           if(iequals(filename, EXCLUDEFILE))
             continue;
 
-          if(is_directory(i->path())) {
+          if(is_directory(i->path())) { // Skip directories; we only want files
             continue;
           }
+
           // Check for exclude
           bool skip = false;
           for(int i=0;i<EX_NUM;i++) {
@@ -524,18 +510,16 @@ int getDirFiles(char *sd, FTENTRY *ftable, int *fti, char excludes[EX_NUM][EX_LE
           if(ftable != NULL) {
             // Fill table. filename...
             static char foo[1024];
-            sprintf(foo, "%s\\%s", sd, filename);
+            sprintf(foo, "%s/%s", sd, filename);
             strcpy(ftable[*fti].fname, foo);
 
             // Modification time
             //ftable[*fti].timestamp = (DWORD) FileTimetoUnixTime(fd.ftCreationTime);
 
             // Size, TODO: 4GB limit check?
-            cout << file_size(i->path()) << "\n";
-            //ftable[*fti].len = (fd.nFileSizeHigh * MAXDWORD) + fd.nFileSizeLow;
             ftable[*fti].len = file_size(i->path());
 
-            (*fti)++;
+            ++(*fti);
           }
         }
       } else
@@ -548,54 +532,6 @@ int getDirFiles(char *sd, FTENTRY *ftable, int *fti, char excludes[EX_NUM][EX_LE
     cout << ex.what() << '\n';
   }
 
-  /*WIN32_FIND_DATA fd;
-  HANDLE h;
-  for(h=FindFirstFile(dir, &fd);res && h != INVALID_HANDLE_VALUE;res = FindNextFile(h, &fd)) {
-    if(!strcmp(fd.cFileName,".."))
-      continue;
-    if(!strcmp(fd.cFileName,"."))
-      continue;
-    if(!_stricmp(fd.cFileName, PREFIXFILE)) // Do not pack prefix file
-      continue;
-    if(!_stricmp(fd.cFileName, EXCLUDEFILE))
-      continue;
-
-    if((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-      char foo[1024];
-      sprintf(foo, "%s\\%s", sd, fd.cFileName);
-      count += getDirFiles(foo, ftable, fti, excludes);
-    } else {
-      // Check for exclude
-      bool skip = false;
-      for(int i=0;i<EX_NUM;i++) {
-        if(strlen(excludes[i]) > 1 && !_stricmp(excludes[i], &fd.cFileName[strlen(fd.cFileName)-strlen(excludes[i])])) {
-          // printf("Skipping: %s - %s\n", fd.cFileName, excludes[i]);
-          skip = true;
-          break;
-        }
-      }
-      if(skip)
-        continue; // File extension is excluded
-
-      count++;
-      if(ftable != NULL) {
-        // Fill table. filename...
-        static char foo[1024];
-        sprintf(foo, "%s\\%s", sd, fd.cFileName);
-        strcpy(ftable[*fti].fname, foo);
-
-        // Modification time
-        ftable[*fti].timestamp = (DWORD) FileTimetoUnixTime(fd.ftCreationTime);
-
-        // Size, TODO: 4GB limit check?
-        ftable[*fti].len = (fd.nFileSizeHigh * MAXDWORD) + fd.nFileSizeLow; 
-
-        (*fti)++;
-      }
-    }
-  }
-  if(h != INVALID_HANDLE_VALUE)
-    FindClose(h);*/
   return count;
 }
 
@@ -605,7 +541,8 @@ bool pboPack(char *sd, char *df, bool overwrite) {
   char excludes[EX_NUM][EX_LEN];
   memset(excludes, 0, EX_NUM*EX_LEN);
   char exname[FNAMELEN];
-  sprintf(exname, "%s\\%s", sd, EXCLUDEFILE);
+  sprintf(exname, "%s/%s", sd, EXCLUDEFILE); // FIX FOR WINDOWS
+  cout << path(sd) << endl;
   FILE *ef = fopen(exname, "rb");
   int eidx = 0;
   if(ef) {
@@ -617,7 +554,7 @@ bool pboPack(char *sd, char *df, bool overwrite) {
       if(excludes[eidx][strlen(excludes[eidx])-1] == 0x0A) // Unix
         excludes[eidx][strlen(excludes[eidx])-1] = 0x00;
       printf("<%s> ", excludes[eidx]);
-      eidx++;
+      ++eidx;
     }
     printf("\n");
     fclose(ef);
@@ -638,8 +575,9 @@ bool pboPack(char *sd, char *df, bool overwrite) {
   char outname[FNAMELEN];
   if(strlen(df) != 0)
     sprintf(outname, "%s", df);
-  else
+  else {
     sprintf(outname, "%s.pbo", sd);
+  }
 
   // Ask for overwriting
   if(!overwrite && fileExists(outname)) {
@@ -675,7 +613,7 @@ bool pboPack(char *sd, char *df, bool overwrite) {
 
   // Check for prefix file & write it
   char foo[FNAMELEN];
-  sprintf(foo, "%s\\%s", sd, PREFIXFILE);
+  sprintf(foo, "%s/%s", sd, PREFIXFILE); // FIX FOR WINDOWS
   FILE *hf = fopen(foo, "rb");
   if(hf) {
     char prefix[FNAMELEN];
@@ -723,7 +661,8 @@ bool pboPack(char *sd, char *df, bool overwrite) {
   for(int i=0;i<fti;i++) {
     printf("file %d/%d: %s (%d KB)\n", i, fti, ft[i].fname, ft[i].len/1024);
 
-    FILE *inp = fopen(ft[i].fname, "rb");
+    string filename(ft[i].fname);
+    FILE *inp = fopen(replace_all_copy(filename, "\\", "").c_str(), "rb");
     if(!inp) {
       printf("Warning! Cannot open file for reading!\n");
       continue;
@@ -796,7 +735,7 @@ bool pboDecompress(BYTE *buf, BYTE *out, int size, int outSize) {
             *optr++ = 0x20;
           else
             *optr++ = *windowptr;
-          windowptr++;
+          ++windowptr;
         }
       }
       f = f >> 1;

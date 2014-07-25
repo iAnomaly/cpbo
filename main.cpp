@@ -102,8 +102,12 @@ int main(int argc, char* argv[]) {
 
       // Extract...
       char *odir = "";
-      if(argc >= ai+3)
+      if(argc >= ai+3) {
+        char *last = argv[ai+2] + strlen(argv[ai+2]) - 1;
+        if (*last == '/' || *last == '\\') // If directory path has trailing slash then remove it (replace with null terminator)
+          *last = '\0';
         odir = argv[ai+2];
+      }
 
       printf("Extracting %s\n", argv[ai+1]);
       if(pboEx(argv[ai+1], odir, overwrite, gui)) {
@@ -122,6 +126,10 @@ int main(int argc, char* argv[]) {
     if(!strcasecmp("-p", argv[ai])) {
       if(argc-ai < 2)
         usage();
+
+      char *last = argv[ai+1] + strlen(argv[ai+1]) - 1;
+      if (*last == '/' || *last == '\\') // If directory path has trailing slash then remove it (replace with null terminator)
+        *last = '\0';
 
       // Create PBO.
       char *ofile = "";
